@@ -1,0 +1,48 @@
+# Working directory (should not be in repository)
+/opt/vless/
+
+# Environment files
+.env
+*.env.local
+*.env.production
+
+# Backup files
+*.bak
+*.backup
+*.tar.gz
+
+# Temporary files
+*.tmp
+*.temp
+*~
+.*.swp
+.*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE files
+.idea/
+.vscode/
+*.iml
+
+# Log files
+*.log
+logs/
+
+# User data
+users.json
+*.key
+*.pem
+qr_codes/
+
+# Proxy credentials (init_claude script)
+.claude_proxy_credentials
+scripts/.claude_proxy_credentials
+
+# Docker
+docker-compose.override.yml
+
+# Catalog
+workflow/
