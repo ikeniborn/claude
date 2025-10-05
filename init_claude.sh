@@ -278,6 +278,115 @@ clear_credentials() {
 }
 
 #######################################
+# Install Node.js and npm
+#######################################
+install_nodejs() {
+    print_info "Installing Node.js and npm..."
+    echo ""
+
+    # Use NodeSource setup script for latest LTS
+    if curl -fsSL https://deb.nodesource.com/setup_18.x | bash -; then
+        if apt-get install -y nodejs; then
+            print_success "Node.js and npm installed successfully"
+            echo ""
+            node --version
+            npm --version
+            echo ""
+            return 0
+        else
+            print_error "Failed to install Node.js package"
+            return 1
+        fi
+    else
+        print_error "Failed to download Node.js setup script"
+        return 1
+    fi
+}
+
+#######################################
+# Install Claude Code globally
+#######################################
+install_claude_code() {
+    print_info "Installing Claude Code globally..."
+    echo ""
+
+    if npm install -g @anthropic-ai/claude-code; then
+        print_success "Claude Code installed successfully"
+        echo ""
+        claude --version 2>/dev/null || print_warning "Claude version check failed (may need to restart shell)"
+        echo ""
+        return 0
+    else
+        print_error "Failed to install Claude Code"
+        return 1
+    fi
+}
+
+#######################################
+# Check and install dependencies
+#######################################
+check_dependencies() {
+    local needs_install=false
+
+    echo ""
+    print_info "Checking dependencies..."
+    echo ""
+
+    # Check npm
+    if ! command -v npm &> /dev/null; then
+        print_warning "npm not found"
+        needs_install=true
+
+        read -p "Install Node.js and npm? (Y/n): " install_node
+        if [[ -z "$install_node" ]] || [[ "$install_node" =~ ^[Yy]$ ]]; then
+            if ! install_nodejs; then
+                print_error "Cannot proceed without npm"
+                exit 1
+            fi
+        else
+            print_error "npm is required to run Claude Code"
+            echo ""
+            echo "Install manually:"
+            echo "  curl -fsSL https://deb.nodesource.com/setup_18.x | sudo -E bash -"
+            echo "  sudo apt-get install -y nodejs"
+            exit 1
+        fi
+    else
+        print_success "npm found: $(npm --version)"
+    fi
+
+    # Check Claude Code
+    if ! command -v claude &> /dev/null && ! [[ -x "/usr/local/bin/claude" || -x "/usr/bin/claude" ]]; then
+        print_warning "Claude Code not found"
+        needs_install=true
+
+        echo ""
+        read -p "Install Claude Code globally? (Y/n): " install_claude
+        if [[ -z "$install_claude" ]] || [[ "$install_claude" =~ ^[Yy]$ ]]; then
+            if ! install_claude_code; then
+                print_error "Cannot proceed without Claude Code"
+                exit 1
+            fi
+        else
+            print_warning "Claude Code is not installed"
+            echo ""
+            echo "Install manually:"
+            echo "  npm install -g @anthropic-ai/claude-code"
+            echo ""
+            echo "You can still install init_claude, but it won't work until Claude Code is installed."
+            read -p "Continue anyway? (y/N): " continue_anyway
+            if [[ ! "$continue_anyway" =~ ^[Yy]$ ]]; then
+                exit 1
+            fi
+        fi
+    else
+        print_success "Claude Code found"
+    fi
+
+    echo ""
+}
+
+#######################################
 # Install script globally
 #######################################
 install_script() {
@@ -291,6 +400,9 @@ install_script() {
         echo "Run: sudo $0 --install"
         exit 1
     fi
+
+    # Check and install dependencies
+    check_dependencies
 
     # Check if already installed
     if [[ -L "$target_path" ]]; then
@@ -409,14 +521,15 @@ Usage: init_claude [OPTIONS] [CLAUDE_ARGS...]
 Initialize Claude Code with HTTP proxy settings
 
 OPTIONS:
-  -h, --help          Show this help message
-  -p, --proxy URL     Set proxy URL directly (skip prompt)
-  -t, --test          Test proxy and exit (don't launch Claude)
-  -c, --clear         Clear saved credentials
-  --install           Install script globally (requires sudo)
-  --uninstall         Uninstall script from system (requires sudo)
-  --no-test           Skip proxy connectivity test
-  --show-password     Display password in output (default: masked)
+  -h, --help                        Show this help message
+  -p, --proxy URL                   Set proxy URL directly (skip prompt)
+  -t, --test                        Test proxy and exit (don't launch Claude)
+  -c, --clear                       Clear saved credentials
+  --install                         Install script globally (requires sudo)
+  --uninstall                       Uninstall script from system (requires sudo)
+  --no-test                         Skip proxy connectivity test
+  --show-password                   Display password in output (default: masked)
+  --dangerously-skip-permissions    Pass --dangerously-skip-permissions to Claude Code
 
 EXAMPLES:
   # Install globally (run once)
@@ -442,6 +555,9 @@ EXAMPLES:
 
   # Pass arguments to Claude Code
   init_claude -- --model claude-3-opus
+
+  # Skip permission checks (use with caution)
+  init_claude --dangerously-skip-permissions
 
 PROXY URL FORMAT:
   http://username:password@host:port
@@ -477,6 +593,7 @@ main() {
     local skip_test=false
     local show_password=false
     local proxy_url=""
+    local skip_permissions=false
     local claude_args=()
 
     # Parse arguments
@@ -512,6 +629,10 @@ main() {
                 ;;
             --show-password)
                 show_password=true
+                shift
+                ;;
+            --dangerously-skip-permissions)
+                skip_permissions=true
                 shift
                 ;;
             --)
@@ -561,6 +682,13 @@ main() {
     if [[ "$test_mode" == true ]]; then
         print_success "Test complete"
         exit 0
+    fi
+
+    # Add --dangerously-skip-permissions flag if requested
+    if [[ "$skip_permissions" == true ]]; then
+        claude_args+=("--dangerously-skip-permissions")
+        print_warning "Skipping permission checks (--dangerously-skip-permissions)"
+        echo ""
     fi
 
     # Launch Claude Code

@@ -46,6 +46,14 @@ sudo ./init_claude.sh --install
 
 После установки команда `init_claude` доступна из любой директории.
 
+**Автоматическая установка зависимостей:**
+
+При первой установке скрипт автоматически проверит и предложит установить:
+- ✅ **Node.js и npm** (если отсутствуют) - через официальный репозиторий NodeSource
+- ✅ **Claude Code** (если отсутствует) - через `npm install -g @anthropic-ai/claude-code`
+
+Для каждой зависимости будет запрошено подтверждение.
+
 **Проверка:**
 ```bash
 init_claude --help
@@ -96,6 +104,12 @@ init_claude --clear
 
 # Быстрый запуск (без проверки подключения)
 init_claude --no-test
+
+# Пропустить проверку прав (для работы в защищенных окружениях)
+init_claude --dangerously-skip-permissions
+
+# Передать аргументы в Claude Code
+init_claude -- --model claude-3-opus
 ```
 
 ---
@@ -109,6 +123,8 @@ init_claude --no-test
 | `init_claude --test` | Проверить подключение |
 | `init_claude --clear` | Очистить настройки |
 | `init_claude --no-test` | Запуск без проверки |
+| `init_claude --dangerously-skip-permissions` | Пропустить проверку прав (использовать осторожно) |
+| `init_claude -- --model opus` | Передать аргументы в Claude Code |
 | `sudo ./init_claude.sh --install` | Установить |
 | `sudo init_claude --uninstall` | Удалить |
 | `init_claude --help` | Справка |
@@ -190,10 +206,33 @@ init_claude --clear
 
 ### Ошибка: "Claude Code not found"
 
-Установите Claude Code:
+**При установке:**
+Скрипт автоматически предложит установить Claude Code. Подтвердите установку (Y).
+
+**Ручная установка:**
 ```bash
 npm install -g @anthropic-ai/claude-code
 ```
+
+### Ошибка: "npm not found"
+
+**При установке:**
+Скрипт автоматически предложит установить Node.js и npm. Подтвердите установку (Y).
+
+**Ручная установка:**
+```bash
+curl -fsSL https://deb.nodesource.com/setup_18.x | sudo -E bash -
+sudo apt-get install -y nodejs
+```
+
+### Проблемы с правами доступа
+
+Если Claude Code выдает ошибки проверки прав:
+```bash
+init_claude --dangerously-skip-permissions
+```
+
+⚠️ **Используйте только в доверенных окружениях!**
 
 ### Как изменить прокси?
 
