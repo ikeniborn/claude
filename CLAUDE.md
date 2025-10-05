@@ -103,6 +103,31 @@ During `--install`, the script automatically checks and installs missing depende
    - Only proceeds with script installation if dependencies are satisfied
    - Can skip dependency installation but warns about missing requirements
 
+### Git and Proxy Considerations
+
+**Important:** Git push/pull through HTTP proxy may not work due to HTTPS CONNECT limitations.
+
+**Issue:**
+- The HTTP proxy works fine for Claude Code and curl
+- However, `git push` fails with error: `Proxy CONNECT aborted`
+- This is a known limitation of some HTTP proxies that don't support HTTPS CONNECT for git
+
+**Workaround for git operations:**
+
+```bash
+# Temporarily disable proxy for git push/pull
+unset HTTPS_PROXY HTTP_PROXY NO_PROXY
+git push origin master
+git pull origin master
+
+# Or use SSH instead of HTTPS for git remote
+git remote set-url origin git@github.com:username/repo.git
+git push origin master
+```
+
+**Credentials file:**
+The proxy credentials are stored in `.claude_proxy_credentials` and are only used by the `init_claude` script. They don't affect global git operations unless you manually export the environment variables.
+
 ### Testing
 No automated tests exist. Test manually:
 ```bash

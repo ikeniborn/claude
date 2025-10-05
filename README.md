@@ -246,6 +246,27 @@ init_claude --clear
 init_claude
 ```
 
+### Проблемы с git push/pull через прокси
+
+**Проблема:** `git push` выдает ошибку `Proxy CONNECT aborted`
+
+**Причина:** Некоторые HTTP прокси не поддерживают HTTPS CONNECT для git операций, хотя отлично работают для Claude Code и curl.
+
+**Решение:**
+
+```bash
+# Вариант 1: Временно отключить прокси для git
+unset HTTPS_PROXY HTTP_PROXY NO_PROXY
+git push origin master
+git pull origin master
+
+# Вариант 2: Использовать SSH вместо HTTPS
+git remote set-url origin git@github.com:username/repo.git
+git push origin master
+```
+
+**Важно:** Прокси credentials из `.claude_proxy_credentials` используются только скриптом `init_claude` и не влияют на git, пока вы не экспортируете переменные окружения вручную.
+
 ---
 
 ## Безопасность
