@@ -180,7 +180,7 @@ prompt_proxy_url() {
     echo "Format: http://username:password@host:port" >&2
     echo "Example: http://alice:secret123@127.0.0.1:8118" >&2
     echo "" >&2
-    echo "Supported protocols: http, https, socks5" >&2
+    echo "Supported protocols: http, socks5" >&2
     echo "" >&2
 
     while true; do
