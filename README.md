@@ -96,6 +96,9 @@ init_claude
 # Установить прокси напрямую
 init_claude --proxy http://user:pass@host:port
 
+# Запуск БЕЗ прокси (прямое соединение)
+init_claude --no-proxy
+
 # Только протестировать подключение
 init_claude --test
 
@@ -120,6 +123,7 @@ init_claude -- --model claude-3-opus
 |---------|----------|
 | `init_claude` | Запуск с сохраненными настройками |
 | `init_claude -p URL` | Установить прокси напрямую |
+| `init_claude --no-proxy` | Запуск БЕЗ прокси (прямое соединение) |
 | `init_claude --test` | Проверить подключение |
 | `init_claude --clear` | Очистить настройки |
 | `init_claude --no-test` | Запуск без проверки |
@@ -176,6 +180,16 @@ init_claude
 ```bash
 # Если есть прокси-сервер
 init_claude --proxy http://username:password@host:port
+```
+
+### Запуск без прокси
+
+```bash
+# Если нужен прямой доступ к интернету (без прокси)
+init_claude --no-proxy
+
+# С дополнительными параметрами
+init_claude --no-proxy -- --model claude-3-opus
 ```
 
 ---

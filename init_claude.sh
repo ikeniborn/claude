@@ -525,6 +525,7 @@ OPTIONS:
   -p, --proxy URL                   Set proxy URL directly (skip prompt)
   -t, --test                        Test proxy and exit (don't launch Claude)
   -c, --clear                       Clear saved credentials
+  --no-proxy                        Launch Claude Code without proxy
   --install                         Install script globally (requires sudo)
   --uninstall                       Uninstall script from system (requires sudo)
   --no-test                         Skip proxy connectivity test
@@ -549,6 +550,9 @@ EXAMPLES:
 
   # Clear saved credentials
   init_claude --clear
+
+  # Launch without proxy
+  init_claude --no-proxy
 
   # Uninstall
   sudo init_claude --uninstall
@@ -594,6 +598,7 @@ main() {
     local show_password=false
     local proxy_url=""
     local skip_permissions=false
+    local no_proxy=false
     local claude_args=()
 
     # Parse arguments
@@ -614,6 +619,10 @@ main() {
             -c|--clear)
                 clear_credentials
                 exit 0
+                ;;
+            --no-proxy)
+                no_proxy=true
+                shift
                 ;;
             --install)
                 install_script
@@ -652,6 +661,28 @@ main() {
     echo "  Claude Code Proxy Initializer v2.0"
     echo "═══════════════════════════════════════"
     echo ""
+
+    # Check if --no-proxy flag is set
+    if [[ "$no_proxy" == true ]]; then
+        print_info "Running without proxy"
+        echo ""
+
+        # Ensure proxy variables are unset
+        unset HTTPS_PROXY
+        unset HTTP_PROXY
+        unset NO_PROXY
+
+        # Add --dangerously-skip-permissions flag if requested
+        if [[ "$skip_permissions" == true ]]; then
+            claude_args+=("--dangerously-skip-permissions")
+            print_warning "Skipping permission checks (--dangerously-skip-permissions)"
+            echo ""
+        fi
+
+        # Launch Claude Code without proxy
+        launch_claude "${claude_args[@]}"
+        exit 0
+    fi
 
     # Get proxy URL (from argument, saved file, or prompt)
     if [[ -z "$proxy_url" ]]; then
