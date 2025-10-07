@@ -355,8 +355,24 @@ check_dependencies() {
         print_success "npm found: $(npm --version)"
     fi
 
-    # Check Claude Code
-    if ! command -v claude &> /dev/null && ! [[ -x "/usr/local/bin/claude" || -x "/usr/bin/claude" ]]; then
+    # Check Claude Code (check multiple locations)
+    local claude_found=false
+
+    if command -v claude &> /dev/null; then
+        claude_found=true
+    elif [[ -x "/usr/local/bin/claude" || -x "/usr/bin/claude" ]]; then
+        claude_found=true
+    else
+        # Check npm global prefix
+        local global_npm_prefix=$(npm prefix -g 2>/dev/null)
+        if [[ -n "$global_npm_prefix" ]]; then
+            if [[ -x "$global_npm_prefix/bin/claude" ]] || ls "$global_npm_prefix/bin/.claude-"* &>/dev/null; then
+                claude_found=true
+            fi
+        fi
+    fi
+
+    if [[ "$claude_found" == false ]]; then
         print_warning "Claude Code not found"
         needs_install=true
 
@@ -470,7 +486,7 @@ launch_claude() {
 
     # Find global claude installation
     local claude_cmd=""
-    
+
     # Check common global locations in priority order
     if [[ -x "/usr/local/bin/claude" ]]; then
         claude_cmd="/usr/local/bin/claude"
@@ -480,33 +496,47 @@ launch_claude() {
         # Fall back to whatever is in PATH, but warn if it's local
         claude_cmd=$(command -v claude)
         local claude_dir=$(dirname "$claude_cmd")
-        if [[ "$claude_dir" == "." || "$claude_dir" == "$PWD" || "$claude_dir" == "$(npm bin)" || "$claude_dir" == "./node_modules/.bin" ]]; then
+        if [[ "$claude_dir" == "." || "$claude_dir" == "$PWD" || "$claude_dir" == "./node_modules/.bin" ]]; then
             print_warning "Found local Claude installation: $claude_cmd"
             print_info "Looking for global installation..."
-            
-            # Try to find global npm installation
-            local global_npm_bin=$(npm bin -g 2>/dev/null)
-            if [[ -n "$global_npm_bin" && -x "$global_npm_bin/claude" ]]; then
-                claude_cmd="$global_npm_bin/claude"
-                print_success "Using global installation: $claude_cmd"
-            else
-                print_error "Global Claude Code installation not found"
-                echo ""
-                echo "Install Claude Code globally:"
-                echo "  npm install -g @anthropic-ai/claude-code"
-                exit 1
+            claude_cmd=""
+        fi
+    fi
+
+    # If not found in standard locations, try npm global prefix
+    if [[ -z "$claude_cmd" ]]; then
+        local global_npm_prefix=$(npm prefix -g 2>/dev/null)
+        if [[ -n "$global_npm_prefix" ]]; then
+            # Check for claude in npm global bin
+            if [[ -x "$global_npm_prefix/bin/claude" ]]; then
+                claude_cmd="$global_npm_prefix/bin/claude"
+            # Check for .claude-* temporary files
+            elif ls "$global_npm_prefix/bin/.claude-"* &>/dev/null; then
+                local temp_claude=$(ls "$global_npm_prefix/bin/.claude-"* 2>/dev/null | head -n 1)
+                if [[ -x "$temp_claude" ]]; then
+                    claude_cmd="$temp_claude"
+                    print_warning "Using temporary Claude binary: $(basename "$temp_claude")"
+                fi
             fi
         fi
-    else
-        print_error "Claude Code not found"
-        echo ""
-        echo "Install Claude Code globally:"
-        echo "  npm install -g @anthropic-ai/claude-code"
-        exit 1
+    fi
+
+    # If still not found, try npx as fallback
+    if [[ -z "$claude_cmd" ]]; then
+        if command -v npx &> /dev/null; then
+            print_info "Using npx to run Claude Code..."
+            exec npx @anthropic-ai/claude-code "$@"
+        else
+            print_error "Claude Code not found"
+            echo ""
+            echo "Install Claude Code globally:"
+            echo "  npm install -g @anthropic-ai/claude-code"
+            exit 1
+        fi
     fi
 
     print_info "Using Claude Code: $claude_cmd"
-    
+
     # Pass through any additional arguments
     exec "$claude_cmd" "$@"
 }
