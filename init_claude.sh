@@ -103,6 +103,64 @@ parse_proxy_url() {
 }
 
 #######################################
+# Detect if NVM is installed and active
+#######################################
+detect_nvm() {
+	# Check if NVM_DIR is set and nvm.sh exists
+	if [[ -n "$NVM_DIR" ]] && [[ -s "$NVM_DIR/nvm.sh" ]]; then
+		return 0
+	fi
+
+	# Check if npm/node is from NVM by examining the path
+	local npm_path=$(command -v npm 2>/dev/null)
+	if [[ -n "$npm_path" ]] && [[ "$npm_path" == *".nvm"* ]]; then
+		return 0
+	fi
+
+	local node_path=$(command -v node 2>/dev/null)
+	if [[ -n "$node_path" ]] && [[ "$node_path" == *".nvm"* ]]; then
+		return 0
+	fi
+
+	return 1
+}
+
+#######################################
+# Get Claude path from NVM environment
+#######################################
+get_nvm_claude_path() {
+	# Try to find claude in active NVM node version
+	if [[ -n "$NVM_DIR" ]]; then
+		# Get current node version
+		local current_node=""
+		if command -v nvm &> /dev/null; then
+			current_node=$(nvm current 2>/dev/null)
+		fi
+
+		# Check if valid version
+		if [[ -n "$current_node" ]] && [[ "$current_node" != "none" ]] && [[ "$current_node" != "system" ]]; then
+			local nvm_claude="$NVM_DIR/versions/node/$current_node/bin/claude"
+			if [[ -x "$nvm_claude" ]]; then
+				echo "$nvm_claude"
+				return 0
+			fi
+		fi
+	fi
+
+	# Alternative: use npm prefix to find global bin
+	local npm_prefix=$(npm prefix -g 2>/dev/null)
+	if [[ -n "$npm_prefix" ]] && [[ "$npm_prefix" == *".nvm"* ]]; then
+		local claude="$npm_prefix/bin/claude"
+		if [[ -x "$claude" ]]; then
+			echo "$claude"
+			return 0
+		fi
+	fi
+
+	return 1
+}
+
+#######################################
 # Save credentials to file
 #######################################
 save_credentials() {
@@ -307,17 +365,259 @@ install_nodejs() {
 # Install Claude Code globally
 #######################################
 install_claude_code() {
-    print_info "Installing Claude Code globally..."
+    local using_nvm=false
+
+    # Detect NVM environment
+    if detect_nvm; then
+        using_nvm=true
+        print_info "Detected NVM environment"
+        echo ""
+    fi
+
+    if [[ "$using_nvm" == true ]]; then
+        print_info "Installing Claude Code to NVM environment..."
+    else
+        print_info "Installing Claude Code globally..."
+    fi
     echo ""
 
     if npm install -g @anthropic-ai/claude-code; then
         print_success "Claude Code installed successfully"
         echo ""
+        if [[ "$using_nvm" == true ]]; then
+            print_info "Installed to: $(npm prefix -g)/bin/claude"
+        fi
         claude --version 2>/dev/null || print_warning "Claude version check failed (may need to restart shell)"
         echo ""
         return 0
     else
         print_error "Failed to install Claude Code"
+        return 1
+    fi
+}
+
+#######################################
+# Get Claude Code version
+#######################################
+get_claude_version() {
+    local claude_cmd=""
+
+    # Priority 1: Check NVM environment first
+    if detect_nvm; then
+        local nvm_claude=$(get_nvm_claude_path)
+        if [[ -n "$nvm_claude" ]]; then
+            claude_cmd="$nvm_claude"
+        fi
+    fi
+
+    # Priority 2: Check system locations if NVM not found
+    if [[ -z "$claude_cmd" ]]; then
+        if command -v claude &> /dev/null; then
+            local cmd_path=$(command -v claude)
+            # Skip if it's from NVM (already checked)
+            if [[ "$cmd_path" != *".nvm"* ]]; then
+                claude_cmd="claude"
+            fi
+        elif [[ -x "/usr/local/bin/claude" ]]; then
+            claude_cmd="/usr/local/bin/claude"
+        elif [[ -x "/usr/bin/claude" ]]; then
+            claude_cmd="/usr/bin/claude"
+        else
+            local global_npm_prefix=$(npm prefix -g 2>/dev/null)
+            if [[ -n "$global_npm_prefix" ]] && [[ -x "$global_npm_prefix/bin/claude" ]]; then
+                claude_cmd="$global_npm_prefix/bin/claude"
+            fi
+        fi
+    fi
+
+    if [[ -z "$claude_cmd" ]]; then
+        echo "not installed"
+        return 1
+    fi
+
+    # Get version
+    local version=$($claude_cmd --version 2>/dev/null | head -n 1)
+    if [[ -z "$version" ]]; then
+        echo "unknown"
+        return 1
+    fi
+
+    echo "$version"
+    return 0
+}
+
+#######################################
+# Check for available updates
+#######################################
+check_update() {
+    print_info "Checking for Claude Code updates..."
+    echo ""
+
+    # Detect NVM environment
+    local using_nvm=false
+    if detect_nvm; then
+        using_nvm=true
+    fi
+
+    # Get current version
+    local current_version=$(get_claude_version)
+    if [[ "$current_version" == "not installed" ]]; then
+        print_error "Claude Code is not installed"
+        echo ""
+        if [[ "$using_nvm" == true ]]; then
+            echo "Install with: npm install -g @anthropic-ai/claude-code"
+        else
+            echo "Install with: sudo init_claude --install"
+        fi
+        return 1
+    fi
+
+    print_info "Current version: $current_version"
+    echo ""
+
+    # Get latest version from npm
+    print_info "Fetching latest version from npm..."
+    local latest_version=$(npm view @anthropic-ai/claude-code version 2>/dev/null)
+
+    if [[ -z "$latest_version" ]]; then
+        print_error "Failed to fetch latest version from npm"
+        return 1
+    fi
+
+    print_info "Latest version:  $latest_version"
+    echo ""
+
+    # Compare versions
+    if [[ "$current_version" == *"$latest_version"* ]]; then
+        print_success "You are running the latest version"
+    else
+        print_warning "An update is available: $latest_version"
+        echo ""
+        if [[ "$using_nvm" == true ]]; then
+            echo "Run to update: init_claude --update"
+            echo "Or directly:   npm install -g @anthropic-ai/claude-code@latest"
+        else
+            echo "Run to update: sudo init_claude --update"
+        fi
+    fi
+
+    return 0
+}
+
+#######################################
+# Update Claude Code
+#######################################
+update_claude_code() {
+    local using_nvm=false
+
+    # Detect NVM environment
+    if detect_nvm; then
+        using_nvm=true
+        print_info "Detected NVM environment"
+        echo ""
+    fi
+
+    # Check if running with sudo (only required for system installations)
+    if [[ "$using_nvm" == false ]] && [[ $EUID -ne 0 ]]; then
+        print_error "Update requires sudo privileges for system installation"
+        echo ""
+        echo "Run: sudo $0 --update"
+        exit 1
+    fi
+
+    # Warn if using sudo with NVM
+    if [[ "$using_nvm" == true ]] && [[ $EUID -eq 0 ]]; then
+        print_warning "Running with sudo, but NVM installation detected"
+        print_warning "This will update the system installation, not NVM"
+        echo ""
+        read -p "Continue with system update? (y/N): " confirm_sudo
+        if [[ ! "$confirm_sudo" =~ ^[Yy]$ ]]; then
+            print_info "Update cancelled"
+            echo ""
+            echo "Run without sudo to update NVM installation:"
+            echo "  init_claude --update"
+            exit 0
+        fi
+        using_nvm=false  # Treat as system installation
+    fi
+
+    print_info "Updating Claude Code..."
+    echo ""
+
+    # Get current version
+    local current_version=$(get_claude_version)
+    if [[ "$current_version" == "not installed" ]]; then
+        print_error "Claude Code is not installed"
+        echo ""
+        if [[ "$using_nvm" == true ]]; then
+            echo "Install first with: npm install -g @anthropic-ai/claude-code"
+        else
+            echo "Install first with: sudo init_claude --install"
+        fi
+        exit 1
+    fi
+
+    print_info "Current version: $current_version"
+    echo ""
+
+    # Get latest version
+    local latest_version=$(npm view @anthropic-ai/claude-code version 2>/dev/null)
+    if [[ -n "$latest_version" ]]; then
+        print_info "Latest version:  $latest_version"
+        echo ""
+    fi
+
+    # Check if already up to date
+    if [[ "$current_version" == *"$latest_version"* ]]; then
+        print_success "Already running the latest version"
+        return 0
+    fi
+
+    # Confirm update
+    read -p "Proceed with update? (Y/n): " confirm_update
+    if [[ -n "$confirm_update" ]] && [[ ! "$confirm_update" =~ ^[Yy]$ ]]; then
+        print_info "Update cancelled"
+        return 0
+    fi
+
+    echo ""
+    if [[ "$using_nvm" == true ]]; then
+        print_info "Installing update to NVM environment..."
+    else
+        print_info "Installing update to system..."
+    fi
+    echo ""
+
+    # Update via npm (use install instead of update for npm 10+ compatibility)
+    if npm install -g @anthropic-ai/claude-code@latest; then
+        echo ""
+        print_success "Claude Code updated successfully"
+        echo ""
+
+        # Clear bash command hash cache to ensure new version is used
+        hash -r 2>/dev/null || true
+
+        # Show new version
+        local new_version=$(get_claude_version)
+        if [[ "$new_version" != "not installed" ]] && [[ "$new_version" != "unknown" ]]; then
+            print_info "New version: $new_version"
+
+            # Check if version actually updated
+            if [[ "$new_version" != *"$latest_version"* ]]; then
+                print_warning "Version still shows: $new_version"
+                echo ""
+                echo "The update was installed but your shell may be using a cached version."
+                echo "Please restart your terminal or run: hash -r"
+            fi
+        fi
+
+        return 0
+    else
+        echo ""
+        print_error "Failed to update Claude Code"
+        echo ""
+        echo "Try manually:"
+        echo "  npm install -g @anthropic-ai/claude-code@latest"
         return 1
     fi
 }
@@ -353,21 +653,45 @@ check_dependencies() {
         fi
     else
         print_success "npm found: $(npm --version)"
+
+        # Detect and show NVM info
+        if detect_nvm; then
+            local npm_prefix=$(npm prefix -g 2>/dev/null)
+            print_info "NVM environment detected"
+            if [[ -n "$npm_prefix" ]]; then
+                print_info "Global packages location: $npm_prefix"
+            fi
+        fi
     fi
 
-    # Check Claude Code (check multiple locations)
+    # Check Claude Code (check multiple locations, prioritize NVM)
     local claude_found=false
 
-    if command -v claude &> /dev/null; then
-        claude_found=true
-    elif [[ -x "/usr/local/bin/claude" || -x "/usr/bin/claude" ]]; then
-        claude_found=true
-    else
-        # Check npm global prefix
-        local global_npm_prefix=$(npm prefix -g 2>/dev/null)
-        if [[ -n "$global_npm_prefix" ]]; then
-            if [[ -x "$global_npm_prefix/bin/claude" ]] || ls "$global_npm_prefix/bin/.claude-"* &>/dev/null; then
+    # Check NVM first
+    if detect_nvm; then
+        local nvm_claude=$(get_nvm_claude_path)
+        if [[ -n "$nvm_claude" ]]; then
+            claude_found=true
+        fi
+    fi
+
+    # Check system locations if not found in NVM
+    if [[ "$claude_found" == false ]]; then
+        if command -v claude &> /dev/null; then
+            local cmd_path=$(command -v claude)
+            # Don't count NVM paths here (already checked)
+            if [[ "$cmd_path" != *".nvm"* ]]; then
                 claude_found=true
+            fi
+        elif [[ -x "/usr/local/bin/claude" || -x "/usr/bin/claude" ]]; then
+            claude_found=true
+        else
+            # Check npm global prefix (non-NVM)
+            local global_npm_prefix=$(npm prefix -g 2>/dev/null)
+            if [[ -n "$global_npm_prefix" ]] && [[ "$global_npm_prefix" != *".nvm"* ]]; then
+                if [[ -x "$global_npm_prefix/bin/claude" ]] || ls "$global_npm_prefix/bin/.claude-"* &>/dev/null; then
+                    claude_found=true
+                fi
             fi
         fi
     fi
@@ -484,29 +808,44 @@ launch_claude() {
     print_info "Launching Claude Code..."
     echo ""
 
-    # Find global claude installation
+    # Find claude installation
     local claude_cmd=""
 
-    # Check common global locations in priority order
-    if [[ -x "/usr/local/bin/claude" ]]; then
-        claude_cmd="/usr/local/bin/claude"
-    elif [[ -x "/usr/bin/claude" ]]; then
-        claude_cmd="/usr/bin/claude"
-    elif command -v claude &> /dev/null; then
-        # Fall back to whatever is in PATH, but warn if it's local
-        claude_cmd=$(command -v claude)
-        local claude_dir=$(dirname "$claude_cmd")
-        if [[ "$claude_dir" == "." || "$claude_dir" == "$PWD" || "$claude_dir" == "./node_modules/.bin" ]]; then
-            print_warning "Found local Claude installation: $claude_cmd"
-            print_info "Looking for global installation..."
-            claude_cmd=""
+    # Priority 1: Check NVM environment first (user's active version)
+    if detect_nvm; then
+        local nvm_claude=$(get_nvm_claude_path)
+        if [[ -n "$nvm_claude" ]]; then
+            claude_cmd="$nvm_claude"
+            print_info "Using NVM installation"
         fi
     fi
 
-    # If not found in standard locations, try npm global prefix
+    # Priority 2: Check system global locations if NVM not found
+    if [[ -z "$claude_cmd" ]]; then
+        if [[ -x "/usr/local/bin/claude" ]]; then
+            claude_cmd="/usr/local/bin/claude"
+        elif [[ -x "/usr/bin/claude" ]]; then
+            claude_cmd="/usr/bin/claude"
+        elif command -v claude &> /dev/null; then
+            # Fall back to whatever is in PATH, but warn if it's local
+            claude_cmd=$(command -v claude)
+            local claude_dir=$(dirname "$claude_cmd")
+            # Skip if it's from NVM (already checked) or local installation
+            if [[ "$claude_cmd" == *".nvm"* ]]; then
+                # Already checked in NVM, shouldn't happen but just in case
+                :
+            elif [[ "$claude_dir" == "." || "$claude_dir" == "$PWD" || "$claude_dir" == "./node_modules/.bin" ]]; then
+                print_warning "Found local Claude installation: $claude_cmd"
+                print_info "Looking for global installation..."
+                claude_cmd=""
+            fi
+        fi
+    fi
+
+    # Priority 3: Try npm global prefix
     if [[ -z "$claude_cmd" ]]; then
         local global_npm_prefix=$(npm prefix -g 2>/dev/null)
-        if [[ -n "$global_npm_prefix" ]]; then
+        if [[ -n "$global_npm_prefix" ]] && [[ "$global_npm_prefix" != *".nvm"* ]]; then
             # Check for claude in npm global bin
             if [[ -x "$global_npm_prefix/bin/claude" ]]; then
                 claude_cmd="$global_npm_prefix/bin/claude"
@@ -558,6 +897,8 @@ OPTIONS:
   --no-proxy                        Launch Claude Code without proxy
   --install                         Install script globally (requires sudo)
   --uninstall                       Uninstall script from system (requires sudo)
+  --update                          Update Claude Code to latest version (requires sudo)
+  --check-update                    Check for available updates without installing
   --no-test                         Skip proxy connectivity test
   --show-password                   Display password in output (default: masked)
   --dangerously-skip-permissions    Pass --dangerously-skip-permissions to Claude Code
@@ -586,6 +927,12 @@ EXAMPLES:
 
   # Uninstall
   sudo init_claude --uninstall
+
+  # Check for updates
+  init_claude --check-update
+
+  # Update Claude Code to latest version
+  sudo init_claude --update
 
   # Pass arguments to Claude Code
   init_claude -- --model claude-3-opus
@@ -660,6 +1007,14 @@ main() {
                 ;;
             --uninstall)
                 uninstall_script
+                exit $?
+                ;;
+            --update)
+                update_claude_code
+                exit $?
+                ;;
+            --check-update)
+                check_update
                 exit $?
                 ;;
             --no-test)
