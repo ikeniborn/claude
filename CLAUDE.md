@@ -92,7 +92,12 @@ Examples:
 ### Script Behavior
 - Uses `set -euo pipefail` for strict error handling
 - Follows symlinks to resolve the script's actual directory
-- Prioritizes global Claude Code installations (`/usr/local/bin/claude`, `/usr/bin/claude`) over local `node_modules`
+- **NVM Support**: Automatically detects and uses Claude Code installed via NVM
+  - Searches for standard `claude` binary
+  - Handles temporary npm binaries (`.claude-*`)
+  - Falls back to direct `cli.js` execution if binaries not found
+  - Supports temporary installation folders (`.claude-code-*`)
+- Prioritizes NVM installations over system installations
 - Warns if local Claude installation detected and attempts to find global installation
 
 ### Dependency Installation
