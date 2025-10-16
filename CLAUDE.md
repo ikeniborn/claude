@@ -12,16 +12,22 @@ The codebase is a standalone bash script (`init_claude.sh`) that:
 
 1. **Credential Management**: Stores proxy credentials in `.claude_proxy_credentials` (chmod 600, git-ignored)
 2. **Proxy Configuration**: Sets environment variables (HTTPS_PROXY, HTTP_PROXY, NO_PROXY) for Claude Code
-3. **Global Installation**: Creates symlink at `/usr/local/bin/init_claude` for system-wide access
-4. **Proxy Detection**: Prioritizes global Claude Code installation over local installations
+3. **Git Proxy Management**: Automatically disables proxy for git operations while keeping it enabled for Claude Code
+4. **Global Installation**: Creates symlink at `/usr/local/bin/init_claude` for system-wide access
+5. **Proxy Detection**: Prioritizes global Claude Code installation over local installations
 
 ### Key Components
 
 - **Proxy URL Parsing** (lines 66-103): Extracts protocol, username, password, host, port from URLs
-- **Credential Persistence** (lines 108-145): Saves/loads proxy settings from `.claude_proxy_credentials`
-- **Proxy Testing** (lines 248-258): Validates connectivity via curl before launching
-- **Dependency Installation** (lines 283-387): Auto-installs Node.js, npm, and Claude Code if missing
-- **Claude Detection** (lines 454-500): Finds global Claude Code binary, avoiding local npm installations
+- **Credential Persistence** (lines 166-203): Saves/loads proxy settings from `.claude_proxy_credentials`
+- **Git Proxy Management** (lines 290-349): Automatically saves/restores git proxy settings
+  - `save_git_proxy_settings()`: Backs up current git proxy config
+  - `configure_git_no_proxy()`: Disables proxy for git operations
+  - `restore_git_proxy()`: Restores original git proxy settings
+- **Proxy Configuration** (lines 274-288): Sets environment variables and configures git
+- **Proxy Testing** (lines 391-403): Validates connectivity via curl before launching
+- **Dependency Installation** (lines 426-570): Auto-installs Node.js, npm, and Claude Code if missing
+- **Claude Detection** (lines 597-643): Finds global Claude Code binary, avoiding local npm installations
 
 ## Common Commands
 
@@ -50,6 +56,12 @@ init_claude --test
 
 # Clear saved credentials
 init_claude --clear
+
+# Restore git proxy settings from backup
+init_claude --restore-git-proxy
+
+# Launch without proxy (also restores git proxy if backup exists)
+init_claude --no-proxy
 
 # Skip connectivity test
 init_claude --no-test
@@ -105,28 +117,43 @@ During `--install`, the script automatically checks and installs missing depende
 
 ### Git and Proxy Considerations
 
-**Important:** Git push/pull through HTTP proxy may not work due to HTTPS CONNECT limitations.
+**Automatic Git Proxy Management:**
 
-**Issue:**
-- The HTTP proxy works fine for Claude Code and curl
-- However, `git push` fails with error: `Proxy CONNECT aborted`
-- This is a known limitation of some HTTP proxies that don't support HTTPS CONNECT for git
+When you configure a proxy for Claude Code, the script automatically disables proxy for git to prevent HTTPS CONNECT issues that cause `git push` to fail.
 
-**Workaround for git operations:**
+**How it works:**
+1. When proxy is configured, the script:
+   - Saves your current git proxy settings to `.claude_git_proxy_backup`
+   - Sets git's `http.proxy` and `https.proxy` to empty strings (bypasses proxy)
+   - Configures environment variables for Claude Code (HTTPS_PROXY, HTTP_PROXY)
 
+2. Git operations (push/pull/fetch) will work directly without proxy
+3. Claude Code will still use the configured proxy
+
+**Restore git proxy settings:**
 ```bash
-# Temporarily disable proxy for git push/pull
-unset HTTPS_PROXY HTTP_PROXY NO_PROXY
-git push origin master
-git pull origin master
-
-# Or use SSH instead of HTTPS for git remote
-git remote set-url origin git@github.com:username/repo.git
-git push origin master
+# Restore original git proxy configuration
+init_claude --restore-git-proxy
 ```
 
-**Credentials file:**
-The proxy credentials are stored in `.claude_proxy_credentials` and are only used by the `init_claude` script. They don't affect global git operations unless you manually export the environment variables.
+**Manual git proxy management:**
+```bash
+# Check current git proxy settings
+git config --global --get http.proxy
+git config --global --get https.proxy
+
+# Manually disable git proxy
+git config --global http.proxy ""
+git config --global https.proxy ""
+
+# Manually enable git proxy
+git config --global http.proxy "http://proxy:port"
+git config --global https.proxy "http://proxy:port"
+```
+
+**Files:**
+- `.claude_proxy_credentials` - Proxy credentials for Claude Code (chmod 600)
+- `.claude_git_proxy_backup` - Backup of git proxy settings (chmod 600, auto-deleted after restore)
 
 ### Testing
 No automated tests exist. Test manually:

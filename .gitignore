@@ -45,4 +45,4 @@ scripts/.claude_proxy_credentials
 docker-compose.override.yml
 
 # Catalog
-workflow/
+workflow/.claude_git_proxy_backup

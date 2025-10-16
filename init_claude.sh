@@ -26,6 +26,7 @@ while [ -L "$SCRIPT_PATH" ]; do
 done
 SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_PATH")" && pwd)"
 CREDENTIALS_FILE="${SCRIPT_DIR}/.claude_proxy_credentials"
+GIT_BACKUP_FILE="${SCRIPT_DIR}/.claude_git_proxy_backup"
 
 #######################################
 # Print colored message
@@ -279,8 +280,75 @@ configure_proxy_from_url() {
     export HTTP_PROXY="$proxy_url"
     export NO_PROXY="localhost,127.0.0.1"
 
+    # Configure git to ignore proxy
+    configure_git_no_proxy
+
     # Save credentials
     save_credentials "$proxy_url"
+}
+
+#######################################
+# Save current git proxy settings
+#######################################
+save_git_proxy_settings() {
+    # Create backup file with restricted permissions
+    touch "$GIT_BACKUP_FILE"
+    chmod 600 "$GIT_BACKUP_FILE"
+
+    # Get current git proxy settings (global config)
+    local http_proxy=$(git config --global --get http.proxy 2>/dev/null || echo "")
+    local https_proxy=$(git config --global --get https.proxy 2>/dev/null || echo "")
+
+    # Save to backup file
+    cat > "$GIT_BACKUP_FILE" << EOF
+HTTP_PROXY=$http_proxy
+HTTPS_PROXY=$https_proxy
+EOF
+}
+
+#######################################
+# Configure git to ignore proxy
+#######################################
+configure_git_no_proxy() {
+    # Save current settings before modifying
+    save_git_proxy_settings
+
+    # Disable proxy for git by setting empty values
+    git config --global http.proxy "" 2>/dev/null || true
+    git config --global https.proxy "" 2>/dev/null || true
+
+    print_info "Git configured to bypass proxy"
+}
+
+#######################################
+# Restore git proxy settings from backup
+#######################################
+restore_git_proxy() {
+    if [[ ! -f "$GIT_BACKUP_FILE" ]]; then
+        print_info "No git proxy backup found"
+        return 0
+    fi
+
+    # Load backup settings
+    source "$GIT_BACKUP_FILE"
+
+    # Restore settings
+    if [[ -n "$HTTP_PROXY" ]]; then
+        git config --global http.proxy "$HTTP_PROXY"
+    else
+        git config --global --unset http.proxy 2>/dev/null || true
+    fi
+
+    if [[ -n "$HTTPS_PROXY" ]]; then
+        git config --global https.proxy "$HTTPS_PROXY"
+    else
+        git config --global --unset https.proxy 2>/dev/null || true
+    fi
+
+    print_success "Git proxy settings restored"
+
+    # Remove backup file
+    rm -f "$GIT_BACKUP_FILE"
 }
 
 #######################################
@@ -305,6 +373,15 @@ display_proxy_info() {
     fi
 
     echo "  NO_PROXY:    $NO_PROXY"
+    echo ""
+
+    # Show git proxy status
+    local git_http_proxy=$(git config --global --get http.proxy 2>/dev/null || echo "(none)")
+    local git_https_proxy=$(git config --global --get https.proxy 2>/dev/null || echo "(none)")
+
+    print_info "Git proxy settings (bypassed for push/pull):"
+    echo "  http.proxy:  $git_http_proxy"
+    echo "  https.proxy: $git_https_proxy"
     echo ""
 }
 
@@ -895,6 +972,7 @@ OPTIONS:
   -t, --test                        Test proxy and exit (don't launch Claude)
   -c, --clear                       Clear saved credentials
   --no-proxy                        Launch Claude Code without proxy
+  --restore-git-proxy               Restore git proxy settings from backup
   --install                         Install script globally (requires sudo)
   --uninstall                       Uninstall script from system (requires sudo)
   --update                          Update Claude Code to latest version (requires sudo)
@@ -921,6 +999,9 @@ EXAMPLES:
 
   # Clear saved credentials
   init_claude --clear
+
+  # Restore git proxy settings from backup
+  init_claude --restore-git-proxy
 
   # Launch without proxy
   init_claude --no-proxy
@@ -959,6 +1040,16 @@ ENVIRONMENT:
   After loading proxy, these variables are set:
     HTTPS_PROXY, HTTP_PROXY, NO_PROXY
 
+GIT PROXY:
+  When proxy is configured, git is automatically set to bypass proxy.
+  This prevents issues with git push/pull through HTTP proxies.
+
+  Your original git proxy settings are backed up to:
+    ${GIT_BACKUP_FILE}
+
+  To restore original git proxy settings:
+    init_claude --restore-git-proxy
+
 INSTALLATION:
   After installing with --install, you can run 'init_claude' from anywhere.
   The script will be available at: /usr/local/bin/init_claude
@@ -995,6 +1086,10 @@ main() {
                 ;;
             -c|--clear)
                 clear_credentials
+                exit 0
+                ;;
+            --restore-git-proxy)
+                restore_git_proxy
                 exit 0
                 ;;
             --no-proxy)
@@ -1056,6 +1151,11 @@ main() {
         unset HTTPS_PROXY
         unset HTTP_PROXY
         unset NO_PROXY
+
+        # Restore git proxy settings if backup exists
+        if [[ -f "$GIT_BACKUP_FILE" ]]; then
+            restore_git_proxy
+        fi
 
         # Add --dangerously-skip-permissions flag if requested
         if [[ "$skip_permissions" == true ]]; then
