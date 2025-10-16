@@ -361,17 +361,17 @@ EOF
 }
 
 #######################################
-# Configure git to ignore proxy
+# Configure git to ignore proxy (deprecated - now we don't modify git config)
 #######################################
 configure_git_no_proxy() {
-    # Save current settings before modifying
-    save_git_proxy_settings
+    # IMPORTANT: We no longer modify git config globally as it can break other tools
+    # Git will automatically use NO_PROXY environment variable if set
 
-    # Disable proxy for git by setting empty values
-    git config --global http.proxy "" 2>/dev/null || true
-    git config --global https.proxy "" 2>/dev/null || true
+    # Just log for information
+    print_info "Git will use NO_PROXY for localhost/127.0.0.1"
 
-    print_info "Git configured to bypass proxy"
+    # Note: We keep save_git_proxy_settings call for compatibility with restore function
+    # but we don't actually modify git config anymore
 }
 
 #######################################
@@ -429,13 +429,9 @@ display_proxy_info() {
     echo "  NO_PROXY:    $NO_PROXY"
     echo ""
 
-    # Show git proxy status
-    local git_http_proxy=$(git config --global --get http.proxy 2>/dev/null || echo "(none)")
-    local git_https_proxy=$(git config --global --get https.proxy 2>/dev/null || echo "(none)")
-
-    print_info "Git proxy settings (bypassed for push/pull):"
-    echo "  http.proxy:  $git_http_proxy"
-    echo "  https.proxy: $git_https_proxy"
+    # Note: We no longer modify git proxy settings
+    # Git respects NO_PROXY environment variable automatically
+    print_info "Git will use NO_PROXY environment variable (localhost, 127.0.0.1 bypassed)"
     echo ""
 }
 
