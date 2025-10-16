@@ -140,10 +140,38 @@ get_nvm_claude_path() {
 
 		# Check if valid version
 		if [[ -n "$current_node" ]] && [[ "$current_node" != "none" ]] && [[ "$current_node" != "system" ]]; then
-			local nvm_claude="${NVM_DIR}/versions/node/$current_node/bin/claude"
-			if [[ -x "$nvm_claude" ]]; then
-				echo "$nvm_claude"
+			local nvm_bin="${NVM_DIR}/versions/node/$current_node/bin"
+			local nvm_lib="${NVM_DIR}/versions/node/$current_node/lib/node_modules/@anthropic-ai"
+
+			# First try standard 'claude' binary
+			if [[ -x "$nvm_bin/claude" ]]; then
+				echo "$nvm_bin/claude"
 				return 0
+			fi
+
+			# Then try temporary .claude-* binaries
+			if ls "$nvm_bin/.claude-"* &>/dev/null; then
+				local temp_claude=$(ls "$nvm_bin/.claude-"* 2>/dev/null | head -n 1)
+				if [[ -x "$temp_claude" ]]; then
+					echo "$temp_claude"
+					return 0
+				fi
+			fi
+
+			# If binaries not found, try to find cli.js in node_modules (including temp folders)
+			if [[ -d "$nvm_lib" ]]; then
+				# Try standard claude-code folder first
+				if [[ -f "$nvm_lib/claude-code/cli.js" ]]; then
+					echo "node $nvm_lib/claude-code/cli.js"
+					return 0
+				fi
+
+				# Then try temporary .claude-code-* folders
+				local temp_cli=$(find "$nvm_lib" -maxdepth 2 -name "cli.js" -path "*/.claude-code-*/cli.js" 2>/dev/null | head -n 1)
+				if [[ -n "$temp_cli" ]] && [[ -f "$temp_cli" ]]; then
+					echo "node $temp_cli"
+					return 0
+				fi
 			fi
 		fi
 	fi
@@ -151,10 +179,36 @@ get_nvm_claude_path() {
 	# Alternative: use npm prefix to find global bin
 	local npm_prefix=$(npm prefix -g 2>/dev/null)
 	if [[ -n "$npm_prefix" ]] && [[ "$npm_prefix" == *".nvm"* ]]; then
-		local claude="$npm_prefix/bin/claude"
-		if [[ -x "$claude" ]]; then
-			echo "$claude"
+		# First try standard 'claude' binary
+		if [[ -x "$npm_prefix/bin/claude" ]]; then
+			echo "$npm_prefix/bin/claude"
 			return 0
+		fi
+
+		# Then try temporary .claude-* binaries
+		if ls "$npm_prefix/bin/.claude-"* &>/dev/null; then
+			local temp_claude=$(ls "$npm_prefix/bin/.claude-"* 2>/dev/null | head -n 1)
+			if [[ -x "$temp_claude" ]]; then
+				echo "$temp_claude"
+				return 0
+			fi
+		fi
+
+		# If binaries not found, try to find cli.js in node_modules
+		local npm_lib="$npm_prefix/lib/node_modules/@anthropic-ai"
+		if [[ -d "$npm_lib" ]]; then
+			# Try standard claude-code folder first
+			if [[ -f "$npm_lib/claude-code/cli.js" ]]; then
+				echo "node $npm_lib/claude-code/cli.js"
+				return 0
+			fi
+
+			# Then try temporary .claude-code-* folders
+			local temp_cli=$(find "$npm_lib" -maxdepth 2 -name "cli.js" -path "*/.claude-code-*/cli.js" 2>/dev/null | head -n 1)
+			if [[ -n "$temp_cli" ]] && [[ -f "$temp_cli" ]]; then
+				echo "node $temp_cli"
+				return 0
+			fi
 		fi
 	fi
 
@@ -952,9 +1006,15 @@ launch_claude() {
     fi
 
     print_info "Using Claude Code: $claude_cmd"
+    echo ""
 
     # Pass through any additional arguments
-    exec "$claude_cmd" "$@"
+    # Use eval if command contains spaces (e.g., "node /path/to/cli.js")
+    if [[ "$claude_cmd" == *" "* ]]; then
+        eval exec "$claude_cmd" '"$@"'
+    else
+        exec "$claude_cmd" "$@"
+    fi
 }
 
 #######################################
