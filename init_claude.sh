@@ -636,6 +636,99 @@ check_update() {
 }
 
 #######################################
+# Cleanup old Claude Code installations (NVM only)
+#######################################
+cleanup_old_claude_installations() {
+	if [[ -z "${NVM_DIR:-}" ]]; then
+		return 0  # Only for NVM installations
+	fi
+
+	local npm_prefix=$(npm prefix -g 2>/dev/null)
+	if [[ -z "$npm_prefix" ]] || [[ "$npm_prefix" != *".nvm"* ]]; then
+		return 0  # Not NVM environment
+	fi
+
+	local lib_dir="$npm_prefix/lib/node_modules/@anthropic-ai"
+	local bin_dir="$npm_prefix/bin"
+
+	if [[ ! -d "$lib_dir" ]]; then
+		return 0  # No installations to clean
+	fi
+
+	local cleaned=false
+
+	# Find temporary .claude-code-* folders
+	local temp_folders=$(find "$lib_dir" -maxdepth 1 -type d -name ".claude-code-*" 2>/dev/null)
+
+	if [[ -n "$temp_folders" ]]; then
+		print_info "Found old temporary Claude installations:"
+		echo "$temp_folders" | while read folder; do
+			echo "  - $(basename "$folder")"
+		done
+		echo ""
+
+		read -p "Remove old temporary installations? (Y/n): " confirm
+		if [[ -z "$confirm" ]] || [[ "$confirm" =~ ^[Yy]$ ]]; then
+			echo "$temp_folders" | while read folder; do
+				if rm -rf "$folder" 2>/dev/null; then
+					print_success "Removed: $(basename "$folder")"
+					cleaned=true
+				else
+					print_warning "Failed to remove: $(basename "$folder")"
+				fi
+			done
+			echo ""
+		fi
+	fi
+
+	# Find and remove broken symlinks in bin/
+	if [[ -d "$bin_dir" ]]; then
+		local broken_links=$(find "$bin_dir" -type l -name ".claude-*" ! -exec test -e {} \; -print 2>/dev/null)
+
+		if [[ -n "$broken_links" ]]; then
+			print_info "Found broken Claude symlinks:"
+			echo "$broken_links" | while read link; do
+				echo "  - $(basename "$link")"
+			done
+			echo ""
+
+			read -p "Remove broken symlinks? (Y/n): " confirm
+			if [[ -z "$confirm" ]] || [[ "$confirm" =~ ^[Yy]$ ]]; then
+				echo "$broken_links" | while read link; do
+					if rm -f "$link" 2>/dev/null; then
+						print_success "Removed: $(basename "$link")"
+						cleaned=true
+					fi
+				done
+				echo ""
+			fi
+		fi
+	fi
+
+	# Check for incomplete claude-code installation (without cli.js)
+	if [[ -d "$lib_dir/claude-code" ]] && [[ ! -f "$lib_dir/claude-code/cli.js" ]]; then
+		print_warning "Found incomplete installation: claude-code (no cli.js)"
+		echo ""
+
+		read -p "Remove incomplete installation? (Y/n): " confirm
+		if [[ -z "$confirm" ]] || [[ "$confirm" =~ ^[Yy]$ ]]; then
+			if rm -rf "$lib_dir/claude-code" 2>/dev/null; then
+				print_success "Removed incomplete installation"
+				cleaned=true
+				echo ""
+			fi
+		fi
+	fi
+
+	if [[ "$cleaned" == true ]]; then
+		print_success "Cleanup completed"
+		echo ""
+	fi
+
+	return 0
+}
+
+#######################################
 # Update Claude Code
 #######################################
 update_claude_code() {
@@ -712,6 +805,12 @@ update_claude_code() {
     fi
 
     echo ""
+
+    # Cleanup old installations if using NVM
+    if [[ "$using_nvm" == true ]]; then
+        cleanup_old_claude_installations
+    fi
+
     if [[ "$using_nvm" == true ]]; then
         print_info "Installing update to NVM environment..."
     else
@@ -722,6 +821,24 @@ update_claude_code() {
     # Update via npm (use install instead of update for npm 10+ compatibility)
     if npm install -g @anthropic-ai/claude-code@latest; then
         echo ""
+
+        # Verify installation success by checking for cli.js
+        local claude_path=$(get_nvm_claude_path 2>/dev/null)
+        if [[ -z "$claude_path" ]] || [[ "$claude_path" == *"not found"* ]]; then
+            print_error "Update installed but Claude Code not found"
+            echo ""
+            echo "The npm install succeeded but Claude Code is not accessible."
+            echo "This might be due to temporary installation files."
+            echo ""
+            echo "Try running cleanup again:"
+            echo "  init_claude --update"
+            echo ""
+            echo "Or manually:"
+            echo "  npm uninstall -g @anthropic-ai/claude-code"
+            echo "  npm install -g @anthropic-ai/claude-code@latest"
+            return 1
+        fi
+
         print_success "Claude Code updated successfully"
         echo ""
 
@@ -747,7 +864,17 @@ update_claude_code() {
         echo ""
         print_error "Failed to update Claude Code"
         echo ""
-        echo "Try manually:"
+
+        # Suggest cleanup if it's an NVM installation
+        if [[ "$using_nvm" == true ]]; then
+            echo "If you see ENOTEMPTY errors, try:"
+            echo "  1. Run: init_claude --update (cleanup will run automatically)"
+            echo "  2. Or manually remove old installations:"
+            echo "     rm -rf ~/.nvm/versions/node/*/lib/node_modules/@anthropic-ai/.claude-code-*"
+            echo ""
+        fi
+
+        echo "Or try manually:"
         echo "  npm install -g @anthropic-ai/claude-code@latest"
         return 1
     fi

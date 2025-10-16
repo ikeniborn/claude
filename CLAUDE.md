@@ -160,6 +160,57 @@ git config --global https.proxy "http://proxy:port"
 - `.claude_proxy_credentials` - Proxy credentials for Claude Code (chmod 600)
 - `.claude_git_proxy_backup` - Backup of git proxy settings (chmod 600, auto-deleted after restore)
 
+### Updating Claude Code
+
+**Check for updates:**
+```bash
+# Check if updates are available (no installation)
+init_claude --check-update
+```
+
+**Update Claude Code:**
+```bash
+# Update to latest version
+init_claude --update  # For NVM installations
+sudo init_claude --update  # For system installations
+```
+
+**NVM-specific behavior:**
+- Automatically detects and cleans up old temporary installations (`.claude-code-*`)
+- Removes broken symlinks (`.claude-*`) before updating
+- Removes incomplete installations (folders without `cli.js`)
+- Verifies update success by checking for working `cli.js`
+
+**Troubleshooting ENOTEMPTY errors:**
+
+If you see `npm error ENOTEMPTY` during update:
+
+1. **Automatic cleanup (recommended):**
+   ```bash
+   init_claude --update
+   # The script will offer to clean up old installations automatically
+   ```
+
+2. **Manual cleanup:**
+   ```bash
+   # Remove old temporary installations
+   rm -rf ~/.nvm/versions/node/*/lib/node_modules/@anthropic-ai/.claude-code-*
+
+   # Remove broken symlinks
+   find ~/.nvm/versions/node/*/bin -type l -name ".claude-*" ! -exec test -e {} \; -delete
+
+   # Then update
+   npm install -g @anthropic-ai/claude-code@latest
+   ```
+
+3. **Nuclear option (complete reinstall):**
+   ```bash
+   npm uninstall -g @anthropic-ai/claude-code
+   npm install -g @anthropic-ai/claude-code@latest
+   ```
+
+**Note:** Updates are never automatic - they only happen when you explicitly run `--update` or `--check-update`.
+
 ### Testing
 No automated tests exist. Test manually:
 ```bash
