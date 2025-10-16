@@ -1398,15 +1398,43 @@ main() {
     display_proxy_info "$show_password"
 
     # Test proxy (unless skipped)
+    local proxy_test_passed=true
     if [[ "$skip_test" == false ]]; then
-        test_proxy
+        if ! test_proxy; then
+            proxy_test_passed=false
+        fi
         echo ""
     fi
 
     # If test mode, exit here
     if [[ "$test_mode" == true ]]; then
-        print_success "Test complete"
+        if [[ "$proxy_test_passed" == true ]]; then
+            print_success "Test complete"
+        else
+            print_warning "Test completed with warnings"
+        fi
         exit 0
+    fi
+
+    # If proxy test failed, ask user if they want to continue
+    if [[ "$proxy_test_passed" == false ]]; then
+        echo ""
+        print_warning "Proxy test failed - Claude Code may not work properly"
+        echo ""
+        read -p "Continue anyway? (y/N): " continue_anyway
+
+        if [[ ! "$continue_anyway" =~ ^[Yy]$ ]]; then
+            echo ""
+            print_info "Launch cancelled"
+            echo ""
+            echo "You can try:"
+            echo "  1. Fix proxy configuration and try again"
+            echo "  2. Run without proxy: init_claude --no-proxy"
+            echo "  3. Skip proxy test: init_claude --no-test"
+            echo "  4. Check proxy credentials: init_claude --clear"
+            exit 0
+        fi
+        echo ""
     fi
 
     # Add --dangerously-skip-permissions flag if requested
