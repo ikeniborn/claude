@@ -220,13 +220,17 @@ get_nvm_claude_path() {
 #######################################
 save_credentials() {
     local proxy_url=$1
+    local insecure=${2:-false}
 
     # Create credentials file with restricted permissions
     touch "$CREDENTIALS_FILE"
     chmod 600 "$CREDENTIALS_FILE"
 
-    # Save URL
-    echo "$proxy_url" > "$CREDENTIALS_FILE"
+    # Save URL and insecure flag
+    cat > "$CREDENTIALS_FILE" << EOF
+PROXY_URL=$proxy_url
+PROXY_INSECURE=$insecure
+EOF
 
     print_success "Credentials saved to: $CREDENTIALS_FILE"
 }
@@ -239,21 +243,28 @@ load_credentials() {
         return 1
     fi
 
-    # Read proxy URL from file
-    local proxy_url
-    proxy_url=$(cat "$CREDENTIALS_FILE")
+    # Source the credentials file
+    source "$CREDENTIALS_FILE"
 
-    if [[ -z "$proxy_url" ]]; then
+    # Check if old format (single line with URL only)
+    if [[ -z "${PROXY_URL:-}" ]]; then
+        # Old format: first line is the URL
+        PROXY_URL=$(head -n 1 "$CREDENTIALS_FILE")
+        PROXY_INSECURE=false
+    fi
+
+    if [[ -z "$PROXY_URL" ]]; then
         return 1
     fi
 
     # Validate URL
-    if ! validate_proxy_url "$proxy_url"; then
+    if ! validate_proxy_url "$PROXY_URL"; then
         print_warning "Saved credentials are invalid, will prompt for new URL"
         return 1
     fi
 
-    echo "$proxy_url"
+    # Return both URL and insecure flag (space-separated)
+    echo "$PROXY_URL ${PROXY_INSECURE:-false}"
     return 0
 }
 
@@ -261,15 +272,22 @@ load_credentials() {
 # Prompt for proxy URL
 #######################################
 prompt_proxy_url() {
-    local saved_url
+    local saved_credentials
 
     # Check if credentials exist
-    if saved_url=$(load_credentials); then
+    if saved_credentials=$(load_credentials); then
+        # Parse space-separated output: URL INSECURE_FLAG
+        local saved_url=$(echo "$saved_credentials" | cut -d' ' -f1)
+        local saved_insecure=$(echo "$saved_credentials" | cut -d' ' -f2)
+
         print_info "Saved proxy found" >&2
         echo "" >&2
         # Hide password in display
         local display_url=$(echo "$saved_url" | sed -E 's|://([^:]+):([^@]+)@|://\1:****@|')
         echo "  URL: $display_url" >&2
+        if [[ "$saved_insecure" == "true" ]]; then
+            echo "  Options: --proxy-insecure" >&2
+        fi
         echo "" >&2
 
         local use_saved=""
@@ -281,7 +299,7 @@ prompt_proxy_url() {
         fi
 
         if [[ -z "$use_saved" ]] || [[ "$use_saved" =~ ^[Yy] ]]; then
-            echo "$saved_url"
+            echo "$saved_url $saved_insecure"
             return 0
         fi
     fi
@@ -290,10 +308,10 @@ prompt_proxy_url() {
     echo "" >&2
     print_info "Enter HTTP proxy URL" >&2
     echo "" >&2
-    echo "Format: http://username:password@host:port" >&2
-    echo "Example: http://alice:secret123@127.0.0.1:8118" >&2
+    echo "Format: protocol://username:password@host:port" >&2
+    echo "Example: https://alice:secret123@127.0.0.1:8118" >&2
     echo "" >&2
-    echo "Supported protocols: http, socks5" >&2
+    echo "Supported protocols: http, https, socks5" >&2
     echo "" >&2
 
     while true; do
@@ -318,7 +336,8 @@ prompt_proxy_url() {
             continue
         fi
 
-        echo "$proxy_url"
+        # Return URL with default insecure=false
+        echo "$proxy_url false"
         return 0
     done
 }
@@ -328,17 +347,28 @@ prompt_proxy_url() {
 #######################################
 configure_proxy_from_url() {
     local proxy_url=$1
+    local insecure=${2:-false}
 
     # Set environment variables
     export HTTPS_PROXY="$proxy_url"
     export HTTP_PROXY="$proxy_url"
     export NO_PROXY="localhost,127.0.0.1"
 
+    # Set PROXY_INSECURE flag for test_proxy()
+    export PROXY_INSECURE="$insecure"
+
+    # If proxy uses HTTPS and insecure flag is set, disable Node.js TLS verification for proxy
+    if [[ "$proxy_url" =~ ^https:// ]] && [[ "$insecure" == "true" ]]; then
+        export NODE_TLS_REJECT_UNAUTHORIZED=0
+        print_warning "TLS certificate verification disabled for proxy connection"
+        echo ""
+    fi
+
     # Configure git to ignore proxy
     configure_git_no_proxy
 
     # Save credentials
-    save_credentials "$proxy_url"
+    save_credentials "$proxy_url" "$insecure"
 }
 
 #######################################
@@ -449,11 +479,16 @@ test_proxy() {
         return 0
     fi
 
-    # Convert https:// proxy URLs to http:// for curl -x (proxies use HTTP protocol)
-    local curl_proxy="${proxy_url/https:\/\//http://}"
+    # Prepare curl command with proxy
+    local curl_opts=(-x "$proxy_url" -s -m 5 -o /dev/null -w "%{http_code}")
+
+    # Add --proxy-insecure for HTTPS proxies if PROXY_INSECURE is set
+    if [[ "$proxy_url" =~ ^https:// ]] && [[ "${PROXY_INSECURE:-false}" == "true" ]]; then
+        curl_opts+=(--proxy-insecure)
+    fi
 
     # Test connection through proxy
-    local http_code=$(curl -x "$curl_proxy" -s -m 5 -o /dev/null -w "%{http_code}" https://www.google.com 2>/dev/null)
+    local http_code=$(curl "${curl_opts[@]}" https://www.google.com 2>/dev/null)
 
     if [[ "$http_code" == "200" ]]; then
         print_success "Proxy connection successful"
@@ -1181,6 +1216,7 @@ OPTIONS:
   -t, --test                        Test proxy and exit (don't launch Claude)
   -c, --clear                       Clear saved credentials
   --no-proxy                        Launch Claude Code without proxy
+  --proxy-insecure                  Ignore self-signed proxy certificates (for HTTPS proxies)
   --restore-git-proxy               Restore git proxy settings from backup
   --install                         Install script globally (requires sudo)
   --uninstall                       Uninstall script from system (requires sudo)
@@ -1202,6 +1238,9 @@ EXAMPLES:
 
   # Set proxy URL directly
   init_claude --proxy http://user:pass@127.0.0.1:8118
+
+  # Set HTTPS proxy with self-signed certificate
+  init_claude --proxy https://user:pass@proxy.example.com:8118 --proxy-insecure
 
   # Test proxy without launching Claude
   init_claude --test
@@ -1232,11 +1271,12 @@ EXAMPLES:
 
 PROXY URL FORMAT:
   http://username:password@host:port
-  https://username:password@host:port
+  https://username:password@host:port  (use with --proxy-insecure for self-signed certs)
   socks5://username:password@host:port
 
   Examples:
     http://alice:secret123@127.0.0.1:8118
+    https://alice:secret123@proxy.example.com:8118  (requires --proxy-insecure)
     socks5://bob:pass456@proxy.example.com:1080
 
 CREDENTIALS:
@@ -1276,6 +1316,7 @@ main() {
     local proxy_url=""
     local skip_permissions=false
     local no_proxy=false
+    local proxy_insecure=false
     local claude_args=()
 
     # Parse arguments
@@ -1333,6 +1374,10 @@ main() {
                 skip_permissions=true
                 shift
                 ;;
+            --proxy-insecure)
+                proxy_insecure=true
+                shift
+                ;;
             --)
                 shift
                 claude_args=("$@")
@@ -1379,8 +1424,19 @@ main() {
     fi
 
     # Get proxy URL (from argument, saved file, or prompt)
+    local proxy_credentials
     if [[ -z "$proxy_url" ]]; then
-        proxy_url=$(prompt_proxy_url)
+        proxy_credentials=$(prompt_proxy_url)
+        # Parse space-separated output: URL INSECURE_FLAG
+        proxy_url=$(echo "$proxy_credentials" | cut -d' ' -f1)
+        local saved_insecure=$(echo "$proxy_credentials" | cut -d' ' -f2)
+        # Override with command-line flag if provided
+        if [[ "$proxy_insecure" == true ]]; then
+            saved_insecure="true"
+        elif [[ "$saved_insecure" != "true" ]]; then
+            saved_insecure="false"
+        fi
+        proxy_insecure="$saved_insecure"
     else
         # Validate provided URL
         if ! validate_proxy_url "$proxy_url"; then
@@ -1392,7 +1448,7 @@ main() {
 
     # Configure proxy
     print_info "Configuring proxy..."
-    configure_proxy_from_url "$proxy_url"
+    configure_proxy_from_url "$proxy_url" "$proxy_insecure"
 
     # Display configuration
     display_proxy_info "$show_password"
