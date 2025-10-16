@@ -108,7 +108,7 @@ parse_proxy_url() {
 #######################################
 detect_nvm() {
 	# Check if NVM_DIR is set and nvm.sh exists
-	if [[ -n "$NVM_DIR" ]] && [[ -s "$NVM_DIR/nvm.sh" ]]; then
+	if [[ -n "${NVM_DIR:-}" ]] && [[ -s "${NVM_DIR}/nvm.sh" ]]; then
 		return 0
 	fi
 
@@ -131,7 +131,7 @@ detect_nvm() {
 #######################################
 get_nvm_claude_path() {
 	# Try to find claude in active NVM node version
-	if [[ -n "$NVM_DIR" ]]; then
+	if [[ -n "${NVM_DIR:-}" ]]; then
 		# Get current node version
 		local current_node=""
 		if command -v nvm &> /dev/null; then
@@ -140,7 +140,7 @@ get_nvm_claude_path() {
 
 		# Check if valid version
 		if [[ -n "$current_node" ]] && [[ "$current_node" != "none" ]] && [[ "$current_node" != "system" ]]; then
-			local nvm_claude="$NVM_DIR/versions/node/$current_node/bin/claude"
+			local nvm_claude="${NVM_DIR}/versions/node/$current_node/bin/claude"
 			if [[ -x "$nvm_claude" ]]; then
 				echo "$nvm_claude"
 				return 0
