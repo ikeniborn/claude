@@ -441,11 +441,37 @@ display_proxy_info() {
 test_proxy() {
     print_info "Testing proxy connectivity..."
 
-    if curl -s -m 5 -o /dev/null -w "%{http_code}" https://www.google.com | grep -q "200"; then
+    # Use -x flag to explicitly pass proxy to curl (works better than env vars)
+    local proxy_url="${HTTPS_PROXY:-${HTTP_PROXY}}"
+
+    if [[ -z "$proxy_url" ]]; then
+        print_warning "No proxy configured, skipping test"
+        return 0
+    fi
+
+    # Convert https:// proxy URLs to http:// for curl -x (proxies use HTTP protocol)
+    local curl_proxy="${proxy_url/https:\/\//http://}"
+
+    # Test connection through proxy
+    local http_code=$(curl -x "$curl_proxy" -s -m 5 -o /dev/null -w "%{http_code}" https://www.google.com 2>/dev/null)
+
+    if [[ "$http_code" == "200" ]]; then
         print_success "Proxy connection successful"
         return 0
+    elif [[ "$http_code" == "000" ]]; then
+        print_warning "Proxy connection failed (timeout or refused)"
+        echo ""
+        echo "  This could mean:"
+        echo "  - Proxy server is unreachable or down"
+        echo "  - Incorrect credentials"
+        echo "  - Firewall blocking the connection"
+        echo ""
+        echo "  Claude Code may still work if proxy becomes available"
+        return 1
     else
-        print_warning "Proxy test failed (but Claude Code may still work)"
+        print_warning "Proxy test returned HTTP $http_code (not 200 OK)"
+        echo ""
+        echo "  Claude Code may still work - the test URL might be blocked"
         return 1
     fi
 }
