@@ -122,43 +122,36 @@ During `--install`, the script automatically checks and installs missing depende
 
 ### Git and Proxy Considerations
 
-**Automatic Git Proxy Management:**
+**Environment Variable Approach:**
 
-When you configure a proxy for Claude Code, the script automatically disables proxy for git to prevent HTTPS CONNECT issues that cause `git push` to fail.
+The script uses **environment variables** (HTTPS_PROXY, HTTP_PROXY, NO_PROXY) to configure proxy settings. These variables:
+- Only affect the current process and its child processes (like Claude Code)
+- **Do NOT modify global git configuration**
+- Git automatically respects NO_PROXY for localhost and 127.0.0.1
 
 **How it works:**
 1. When proxy is configured, the script:
-   - Saves your current git proxy settings to `.claude_git_proxy_backup`
-   - Sets git's `http.proxy` and `https.proxy` to empty strings (bypasses proxy)
-   - Configures environment variables for Claude Code (HTTPS_PROXY, HTTP_PROXY)
+   - Sets environment variables: HTTPS_PROXY, HTTP_PROXY, NO_PROXY
+   - These variables are inherited by Claude Code when launched
+   - Git automatically uses NO_PROXY to bypass proxy for local addresses
 
-2. Git operations (push/pull/fetch) will work directly without proxy
-3. Claude Code will still use the configured proxy
+2. Git operations work normally:
+   - Git respects the NO_PROXY environment variable
+   - Local operations (localhost, 127.0.0.1) bypass proxy automatically
+   - Remote operations use your existing git config (not modified by this script)
 
-**Restore git proxy settings:**
-```bash
-# Restore original git proxy configuration
-init_claude --restore-git-proxy
-```
+3. Claude Code uses the proxy:
+   - Reads HTTPS_PROXY and HTTP_PROXY from environment
+   - Uses proxy for API calls to Anthropic
 
-**Manual git proxy management:**
-```bash
-# Check current git proxy settings
-git config --global --get http.proxy
-git config --global --get https.proxy
-
-# Manually disable git proxy
-git config --global http.proxy ""
-git config --global https.proxy ""
-
-# Manually enable git proxy
-git config --global http.proxy "http://proxy:port"
-git config --global https.proxy "http://proxy:port"
-```
+**Important Notes:**
+- The script does **NOT** modify `git config --global` settings
+- Your system's git configuration remains unchanged
+- Proxy settings only apply to the `init_claude` session and Claude Code
 
 **Files:**
 - `.claude_proxy_credentials` - Proxy credentials for Claude Code (chmod 600)
-- `.claude_git_proxy_backup` - Backup of git proxy settings (chmod 600, auto-deleted after restore)
+- `.claude_git_proxy_backup` - Deprecated (kept for compatibility)
 
 ### Updating Claude Code
 
